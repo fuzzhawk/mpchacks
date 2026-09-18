@@ -1,34 +1,100 @@
 # MPC1000 Custom OS
 
-Reverse engineering and custom OS development for the Akai MPC1000.
+Reverse engineering the Akai MPC1000 firmware (via JJOS 3.16) with the goal of
+building a custom OS for the machine.
 
-## Start here
+## Where things stand
 
-Read [`HANDOFF.md`](HANDOFF.md) — full findings from initial binary analysis session.
+The hardware and the firmware container are understood well enough to build
+and flash a custom image. The application layer — sequencer, sampler, UI,
+audio path — is mapped but not yet reverse engineered.
+
+**Solved:**
+
+- CPU, endianness and load address, proven from the binary
+- Full memory map, including the on-chip X/Y RAM the bootblock runs from
+- The reset-to-OS boot sequence, register by register
+- SDRAM auto-sizing from the SODIMM SPD
+- NOR flash command set, sector size and partition layout
+- **The OS image format and its CRC-32** — `tools/mpcimg.py` rebuilds the
+  stock image byte-for-byte, so we can produce images the stock bootblock
+  will accept
+- **The OS's run-time relocation** — the OS copies itself into SDRAM and runs
+  there, which is why string cross-references appeared to be missing. With the
+  mapping applied, they work, and the code is navigable
+- The audio DSP overlay is located: the last 11.6 KB of the image is copied
+  into the SH3-DSP's on-chip X/Y memories
+
+**Not yet solved:** display driver, CompactFlash driver, audio codec path,
+MIDI UART, pad/key scanning, and the whole application layer.
+
+## Read these first
+
+| Document | Contents |
+|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | CPU, memory map, peripherals, flash — with the evidence for each claim |
+| [`docs/BOOT.md`](docs/BOOT.md) | The bootblock, step by step, from reset to OS entry |
+| [`docs/IMAGE_FORMAT.md`](docs/IMAGE_FORMAT.md) | The OS image header and CRC-32, and how to build a valid image |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | What to do next, in order |
+| [`HANDOFF.md`](HANDOFF.md) | First-session notes. Partly superseded — corrections are marked inline |
 
 ## Quick facts
 
-- **CPU:** Renesas SH7727 (SH3-DSP), little-endian, 16-bit instructions
-- **Binary analyzed:** JJOS 3.16 (`mpc1000_jv316.bin`)
-- **Functions identified:** 1,822
-- **Ghidra load address:** `0x8C000000`, processor `SH-3 LE`
-
-## Files
-
-| File | Description |
+| | |
 |---|---|
-| `HANDOFF.md` | Full analysis findings — read first |
-| `mpc1000_jv316.bin` | JJOS 3.16 firmware binary |
-| `analyze.py` | Python analysis utilities (section map, disassembler, string finder) |
+| CPU | Renesas SuperH **SH3-DSP**, little-endian, 16-bit instructions (SH7727, inferred) |
+| **Load address** | **`0xA0000000`** (P2, uncached). File offset N = `0xA0000000 + N` |
+| Bootblock entry | `0xA0000800` |
+| OS entry | `0xA0010030` |
+| VBR | `0xA0000000` |
+| SDRAM | `0x88000000` (area 2) and `0x8C000000` (area 3) |
+| On-chip XRAM / YRAM | `0xA5007000` / `0xA5017000`, 8 KB each |
+| Flash | AMD command set, 16-bit, 64 KB sectors. Sector 0 = bootblock, sectors 1–13 = OS |
+| Max OS image | `0xD0000` = 851,968 bytes |
+| OS run-time base | flash offset + `0x8842B644` (OS text starts at `0x8843B644`) |
+| DSP overlay | flash `0x0B3DFC`–`0x0B74D8` -> on-chip X/Y RAM |
+| Analyzed binary | JJOS 3.16, built 2015-02-13 |
 
-## Usage
+## Tools
 
 ```bash
-python3 analyze.py mpc1000_jv316.bin
+# check / build / split OS images
+python3 tools/mpcimg.py verify  mpc1000_jv316.bin
+python3 tools/mpcimg.py extract mpc1000_jv316.bin -o os.bin
+python3 tools/mpcimg.py build   payload.bin -o MYOS.BIN --version 1.00
+
+# annotated disassembly (resolves literals, names SH-3 registers, inlines strings)
+python3 tools/disasm.py mpc1000_jv316.bin 0x800 60
+python3 tools/disasm.py mpc1000_jv316.bin 0xa0008924 --func
+
+# strings with the offsets of the code that loads them
+python3 tools/strings_xref.py mpc1000_jv316.bin REVERB
 ```
 
-## References
+| File | Purpose |
+|---|---|
+| `tools/sh3.py` | SH-3 decoding, literal resolution, register names, recursive-descent code discovery |
+| `tools/disasm.py` | Annotated disassembler CLI |
+| `tools/strings_xref.py` | Strings plus the instructions that reference them |
+| `tools/mpcimg.py` | OS image verify / build / fix / extract |
+| `tools/ghidra_load_mpc1000.py` | Ghidra setup: memory blocks, labels, entry points |
+| `analyze.py` | Original first-session script (kept for reference) |
 
-- SH7727 Hardware Manual (Renesas / Hitachi HD6417727)
-- SH-3 Software Manual (instruction set)
-- [Ghidra](https://ghidra-sre.org/) — load binary as Raw, SH-3 LE, base `0x8C000000`
+`tools/disasm.py` needs `pip install capstone` (Capstone 5+, which has
+`CS_ARCH_SH`). The rest is pure Python.
+
+## Ghidra
+
+Import `mpc1000_jv316.bin` as **Raw Binary**, language **SH-3 / 16 / little**,
+base address **`a0000000`**, then run `tools/ghidra_load_mpc1000.py` from the
+Script Manager. It creates the SDRAM / XRAM / YRAM / peripheral blocks, labels
+the vectors and the known routines, and disassembles the entry points.
+
+## Legal note
+
+`mpc1000_jv316.bin` is third-party firmware (JJOS, by Japanese developer "JJ"),
+included here as the analysis subject. The goal of this project is an
+independent, clean OS for hardware people own — not redistribution of, or a
+derivative of, JJOS. Anything written here should be an original
+implementation informed by hardware facts (register addresses, bus timings,
+the image container), not copied JJOS code.

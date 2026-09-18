@@ -1,4 +1,18 @@
 # MPC1000 Custom OS — Reverse Engineering Handoff
+
+> **Superseded in part.** This is the record of the first analysis session.
+> A later session verified its findings against the binary and corrected
+> several of them. **Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md),
+> [`docs/BOOT.md`](docs/BOOT.md) and
+> [`docs/IMAGE_FORMAT.md`](docs/IMAGE_FORMAT.md) first.**
+>
+> Corrections made below are marked **[CORRECTED]**. The two that matter most:
+>
+> - The load address is **`0xA0000000`**, not `0x8C000000`. Loading at the
+>   wrong base makes every pointer in the image resolve to nothing.
+> - The bootblock validates an OS image with `memcmp(hdr,"MPC1000",7)` plus a
+>   **CRC-32**, not the `MPC1001 JJ OS2XL` string.
+
 **Session date:** September 18, 2026  
 **Binary analyzed:** `mpc1000_jv316.bin` (JJOS 3.16)  
 **Goal:** Reverse-engineer JJOS to inform development of a custom MPC1000 OS
@@ -34,19 +48,24 @@ This changes everything about toolchain selection. Ignore any community info poi
 | Header | `0x000000–0x0007FF` | 2 KB | Bootblock config, magic string `MPC1000BOOT`, load address hints |
 | Bootblock code | `0x000800–0x00A2FF` | ~38 KB | Boot/flash-updater code; self-contained; **start here** |
 | Padding | `0x00A300–0x00FFFF` | ~24 KB | Zeroed |
-| Section 2 | `0x010000–0x0113FF` | ~5 KB | Unknown — possibly init stubs or interrupt dispatch |
-| **Main OS code** | `0x011500–0x0AC5FF` | **~620 KB** | Core JJOS — sequencer, sampler, UI, MIDI, effects |
+| OS image header | `0x010000–0x01002F` | 48 B | **[CORRECTED]** `"MPC1000"` magic, version, size, CRC-32, load address `0xA0010030`, build date. See `docs/IMAGE_FORMAT.md` |
+| **Main OS code** | `0x010030–0x0A6000` | **~620 KB** | **[CORRECTED]** code starts at `0x010030`, immediately after the header — core JJOS: sequencer, sampler, UI, MIDI, effects |
 | String/data tables | `0x0AD600–0x0AF2FF` | ~7 KB | UI strings, MIDI name tables, effect names |
 | Additional data | `0x0AF400–0x0B74D8` | ~27 KB | Audio tables, patch data, more config |
 
 ### Key File Header Fields (offset 0x0)
 
 ```
-Bytes 0–3:   01 D0 2B 40  — magic / version marker
-Bytes 4–7:   09 00 00 00
-Bytes 8–11:  00 08 00 A0  — load address hint: 0xA0000800
+Bytes 0–3:   01 D0 2B 40  — NOT a magic number: this is SH-3 code
+                            d001  mov.l @(0x8,pc),r0
+                            402b  jmp   @r0
+Bytes 4–7:   09 00 00 00  — 0009 = nop (the jmp's delay slot)
+Bytes 8–11:  00 08 00 A0  — the jump target: 0xA0000800
 Bytes 0x20:  "MPC1000BOOT" — bootblock identifier string
 ```
+
+**[CORRECTED]** The first 12 bytes are the SH-3 reset vector, not a header.
+This is what proves the image is mapped at `0xA0000000`.
 
 ---
 
@@ -69,8 +88,9 @@ Also present in binary: `MPC1001 JJ OS2`, `MPC1001 JJ OS3`, `MPC1001 JJ OS2XL` �
 
 | Metric | Count |
 |---|---|
-| Function entry points (`STS.L PR,@-R15` prologue) | **1,822** |
-| RTS (return) instructions | **2,424** |
+| Function entry points (`STS.L PR,@-R15` prologue) | **1,822** (1,826 counting from offset 0) |
+| RTS (return) instructions | **2,424** (2,452 counting from offset 0) |
+| **[CORRECTED]** Functions found by recursive-descent disassembly | **2,267** in the main OS, **127** in the bootblock |
 | Architecture confirmation method | SH LE prologue pattern `bytes 22 4F` |
 
 First function: `0x1A64`  
@@ -108,7 +128,7 @@ All strings are in the region `0xA6000–0xB4000`. Cross-referencing these back 
 The bootblock (`0x800–0xA300`) is a standalone flash update utility. It:
 1. Checks for a CompactFlash card at boot
 2. Searches for a valid OS file (FAT12/16/32)
-3. Validates the OS file against magic strings (`MPC1001 JJ OS2XL`, etc.)
+3. **[CORRECTED]** Validates the OS file with `memcmp(hdr,"MPC1000",7)` and a CRC-32
 4. Erases and re-flashes the main OS region
 5. Falls back to emergency mode or SODIMM memory check mode if needed
 
@@ -145,7 +165,10 @@ User breakpoint trap
 DMA address error
 ```
 
-The VBR is set early in the boot sequence. Finding where it gets set (`LDC Rn, VBR` instruction) will give you the interrupt table base address.
+**[CORRECTED — found]** VBR is set at `0xA000090C` (`ldc r2,vbr`, `r2 =
+0xA0000000`), so the vector table is at the base of flash: `VBR+0x100`
+(general exception), `VBR+0x400` (TLB miss), `VBR+0x600` (interrupt). All
+three jump to one handler at `0xA00048A0`.
 
 ---
 
@@ -155,9 +178,11 @@ The VBR is set early in the boot sequence. Finding where it gets set (`LDC Rn, V
 - **Ghidra** (free, NSA) — has SH3 support
   - Load `mpc1000_jv316.bin` as **raw binary**
   - Processor: `SH-3 LE` (little-endian)
-  - Base address: `0x8C000000` (SH3 cached P1 RAM, standard for SH7727)
-  - Or try `0xA0000000` (uncached P2) — check which matches the header hint `0xA0000800`
-  - Mark `0x8C000800` (after header) as code entry point
+  - Base address: **`0xA0000000`** **[CORRECTED]** — confirmed by the reset
+    vector and by the OS header's load-address field (`0xA0010030`). Do not
+    use `0x8C000000`; that is SDRAM, not flash.
+  - Mark `0xA0000800` (bootblock) and `0xA0010030` (OS) as code entry points
+  - Or just run `tools/ghidra_load_mpc1000.py`, which does all of this
   - Define the string table region as data
 
 - **sh-elf-objdump** for quick CLI disassembly
@@ -204,12 +229,17 @@ apt install gcc-sh-linux-gnu   # or build sh-elf-gcc from source
 ## 10. Notes for Claude Code Session
 
 - The binary is SH3 little-endian — confirm Ghidra is set to `SH-3 LE` before any analysis
+- **[CORRECTED]** It is specifically an SH3-**DSP** part: the bootblock uses the
+  on-chip X/Y data memories at `0xA5007000` and `0xA5017000`
 - Function prologue to search: bytes `22 4F` (STS.L PR,@-R15) — 1,822 identified
 - The "code" sections have entropy ~7.1 (not encrypted, just dense SH3 bytecode)
 - Strings are NOT encrypted — entire UI string table is readable ASCII
 - The file appears to be a flat binary dump, not ELF — no section headers, load as raw
 - Two `MPC1000BOOT` strings: `0x20` (main header) and `0x8DBC` (inside bootblock code)
-- JJOS stores its own identifier string `MPC1001 JJ OS2XL` — this is what the bootblock validates on CF card before flashing
+- **[CORRECTED]** `MPC1001 JJ OS2XL` is *not* what the bootblock validates.
+  The bootblock checks `memcmp(header, "MPC1000", 7)` and a CRC-32 over the
+  image, and nothing else. The `MPC1001 JJ OS*` strings are used by the main
+  OS to identify JJOS variants. See `docs/IMAGE_FORMAT.md`.
 
 ---
 
