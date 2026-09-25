@@ -1,0 +1,14 @@
+# Milestone 0: prove you can build, flash and boot a modified OS.
+#
+# Changes nothing functional.  It only rewrites the version banner the OS
+# draws on screen, so that when the machine comes up you can see at a glance
+# whether it is running your image or the stock one.  Do this first and
+# confirm it on the hardware before patching anything that matters.
+#
+# Written against JJOS 3.16 (mpc1000_jv316.bin, CRC 0x40705C18).
+
+[version-banner]
+desc = OS banner reads "QFADER OS 0.01" instead of "JJ OS Ver.3.16"
+@0a64f8
+- "JJ OS Ver.3.16 "
++ "QFADER OS  0.01"

@@ -146,12 +146,23 @@ functions that do not open with a register save.
 Reference counts from the literal pools back this up: 16,531 into the text and
 data image, 2,611 into the `0x881C0000` area, 8,452 into BSS, 179 into X/Y RAM.
 
-**The last 11.6 KB of the image is a DSP overlay.** Four segments totalling
-`0x36DC` bytes are copied into the SH3-DSP's on-chip X and Y memories — the
-only code in the system placed there deliberately at run time, in the memories
-the DSP unit can access in a single cycle. That is where the audio engine
-lives, and it is the natural starting point for anyone working on the sample
-playback path.
+**The last 11.6 KB of the image is a DSP overlay — of data, not code.**
+Four segments are copied into the SH3-DSP's on-chip X and Y memories, the
+memories the DSP unit reaches in a single cycle. Their contents:
+
+| Segment | Size | Non-zero | Character |
+|---|---|---|---|
+| `->` XRAM `0xA50089BC` | 1,540 B | 89.5 % | dense initialised tables |
+| `->` YRAM `0xA50183B4` | 872 B | 86.7 % | dense initialised tables |
+| `->` XRAM `0xA5007000` | 6,588 B | 11.8 % | mostly zero, 72 pointer words |
+| `->` YRAM `0xA5017000` | 5,044 B | 0.8 % | mostly zero, 1 pointer word |
+
+A first reading of this called it the audio engine. That was wrong: the two
+large segments are overwhelmingly zero with sparse pre-linked pointers into
+X/Y RAM and SDRAM, which is pre-initialised working *storage* — plausibly the
+voice/channel state the audio path touches per sample, but not its code. The
+engine code is in SDRAM with everything else. Treat these segments as
+variables: they are not spare space, and disassembling them yields nothing.
 
 `tools/sh3.py` implements this as `runtime_addr()` / `flash_off()`, and both
 `disasm.py` and `strings_xref.py` resolve through it. That is what makes

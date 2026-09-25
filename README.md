@@ -35,6 +35,7 @@ MIDI UART, pad/key scanning, and the whole application layer.
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | CPU, memory map, peripherals, flash — with the evidence for each claim |
 | [`docs/BOOT.md`](docs/BOOT.md) | The bootblock, step by step, from reset to OS entry |
 | [`docs/IMAGE_FORMAT.md`](docs/IMAGE_FORMAT.md) | The OS image header and CRC-32, and how to build a valid image |
+| [`docs/QLINK_FADERS.md`](docs/QLINK_FADERS.md) | Q-link faders -> sample start/end: hook points, patch space, and what reverse actually costs |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | What to do next, in order |
 | [`HANDOFF.md`](HANDOFF.md) | First-session notes. Partly superseded — corrections are marked inline |
 
@@ -69,7 +70,15 @@ python3 tools/disasm.py mpc1000_jv316.bin 0xa0008924 --func
 
 # strings with the offsets of the code that loads them
 python3 tools/strings_xref.py mpc1000_jv316.bin REVERB
+
+# patch the OS: verify expected bytes, apply, recompute size + CRC
+python3 tools/mpcpatch.py check mpc1000_jv316.bin patches/00-boot-proof.patch
+python3 tools/mpcpatch.py apply mpc1000_jv316.bin patches/00-boot-proof.patch -o QFADER.BIN
 ```
+
+Patches refuse to apply unless the bytes they expect are actually present, and
+writes into the bootblock (flash `0x000000`-`0x00FFFF`) are refused outright —
+a bad bootblock write cannot be recovered on this machine.
 
 | File | Purpose |
 |---|---|
@@ -77,6 +86,7 @@ python3 tools/strings_xref.py mpc1000_jv316.bin REVERB
 | `tools/disasm.py` | Annotated disassembler CLI |
 | `tools/strings_xref.py` | Strings plus the instructions that reference them |
 | `tools/mpcimg.py` | OS image verify / build / fix / extract |
+| `tools/mpcpatch.py` | Apply verified byte patches, fix the CRC, emit a flashable image |
 | `tools/ghidra_load_mpc1000.py` | Ghidra setup: memory blocks, labels, entry points |
 | `analyze.py` | Original first-session script (kept for reference) |
 
