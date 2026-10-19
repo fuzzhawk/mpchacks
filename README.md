@@ -34,6 +34,41 @@ audio path — is mapped but not yet reverse engineered.
 **Not yet solved:** CompactFlash driver, audio codec path, MIDI UART,
 pad/key scanning, and the whole application layer.
 
+## Building it
+
+There is nothing to cross-compile. The OS image is the stock JJOS 3.16 flash
+image with a verified byte patch applied and its CRC-32 recomputed, and the
+splash is a generated file — all pure Python, no SH toolchain involved.
+
+**In CI:** every push runs
+[`.github/workflows/build.yml`](.github/workflows/build.yml), which verifies
+the stock firmware, self-tests that the toolchain still reproduces it byte for
+byte, applies the patches, and checks the splash against a simulation of the
+firmware's own BMP parser. Download the `morningcloak-os` artifact from the
+run — you do not need anything installed locally.
+
+**Locally**, if you want to:
+
+```bash
+pip install Pillow
+python3 tools/mpcpatch.py apply mpc1000_jv316.bin patches/*.patch -o MCLOAK.BIN
+python3 tools/mksplash.py -o MPC1000.BMP --text "morningcloak os"
+python3 tools/simsplash.py MPC1000.BMP
+```
+
+### Putting it on the machine
+
+| File | Where | What it does |
+|---|---|---|
+| `MCLOAK.BIN` | CF card root | the OS. Hold the OS-update keys at power-on and confirm with REC |
+| `MPC1000.BMP` | CF card root | the boot splash, shown at every start-up. No flashing needed |
+
+Flashing the OS is the only risky step. Keep a known-good stock JJOS `.bin` on
+a card so you can always go back, and never write the bootblock — `mpcpatch`
+refuses to by default.
+
+The splash is just a file: drop it on the card, and remove it to go back.
+
 ## Read these first
 
 | Document | Contents |
