@@ -1,0 +1,20 @@
+# morningcloak os - boot banner
+#
+# Renames the OS banner on the start-up screen.  Nothing functional changes:
+# this is the same JJOS 3.16, byte for byte, apart from these 15 characters
+# (and the header CRC, which mpcpatch recomputes).
+#
+# "JJ OS Ver.3.16 " and "morningcloak os" are both exactly 15 characters, so
+# the string is replaced in place with nothing moved or resized.
+#
+# Note the banner is only drawn when there is NO MPC1000.BMP on the card.  If
+# the splash image is present it is shown instead, so put the name in the
+# image too - tools/mksplash.py does.
+#
+# Written against JJOS 3.16 (mpc1000_jv316.bin, stock CRC 0x40705C18).
+
+[banner]
+desc = start-up banner reads "morningcloak os"
+@0a64f8
+- "JJ OS Ver.3.16 "
++ "morningcloak os"

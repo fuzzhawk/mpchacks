@@ -1,0 +1,86 @@
+name: build morningcloak os
+
+# Everything here is pure Python - there is no cross-compiler and nothing to
+# link.  The OS image is the stock JJOS 3.16 flash image with a verified byte
+# patch applied and its CRC-32 recomputed; the splash is a generated BMP that
+# JJOS loads from the card at start-up.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Pillow
+        run: python -m pip install --quiet Pillow
+
+      - name: Check the stock firmware is the one the patches expect
+        run: python3 tools/mpcimg.py verify mpc1000_jv316.bin
+
+      - name: Self-test - rebuild the stock image from its own payload
+        # If this ever stops matching byte for byte, our understanding of the
+        # header or the CRC has drifted and no output should be trusted.
+        run: |
+          python3 - <<'EOF'
+          import sys, datetime
+          sys.path.insert(0, 'tools')
+          import mpcimg
+          stock = open('mpc1000_jv316.bin', 'rb').read()[mpcimg.OS_FLASH_OFF:]
+          rebuilt = mpcimg.build(stock[0x30:], '3.16', 0xa0010030,
+                                 datetime.date(2015, 2, 13))
+          assert rebuilt == stock, 'rebuilt image does not match the stock image'
+          print('self-test ok: stock image reproduced byte for byte')
+          EOF
+
+      - name: Check the patch applies cleanly
+        run: python3 tools/mpcpatch.py check mpc1000_jv316.bin patches/*.patch
+
+      - name: Build the OS image
+        run: |
+          mkdir -p out
+          python3 tools/mpcpatch.py apply mpc1000_jv316.bin patches/*.patch \
+            -o out/MCLOAK.BIN
+
+      - name: Verify the built image
+        run: python3 tools/mpcimg.py verify out/MCLOAK.BIN
+
+      - name: Build the boot splash
+        run: |
+          python3 tools/mksplash.py -o out/MPC1000.BMP \
+            --text "morningcloak os" --png out/splash-preview.png
+          python3 tools/mksplash.py -o out/MPC1000-inverted.BMP \
+            --text "morningcloak os" --invert
+
+      - name: Verify the splash against a simulation of the firmware parser
+        run: |
+          python3 tools/simsplash.py out/MPC1000.BMP | tee out/splash-ascii.txt
+          python3 tools/simsplash.py out/MPC1000-inverted.BMP > /dev/null
+
+      - name: Summary
+        run: |
+          {
+            echo '## morningcloak os'
+            echo
+            echo '| file | bytes | what to do with it |'
+            echo '|---|---|---|'
+            echo "| \`MCLOAK.BIN\` | $(stat -c%s out/MCLOAK.BIN) | copy to the CF card root, hold the OS-update keys at power-on |"
+            echo "| \`MPC1000.BMP\` | $(stat -c%s out/MPC1000.BMP) | copy to the CF card root - shown at every start-up |"
+            echo "| \`MPC1000-inverted.BMP\` | $(stat -c%s out/MPC1000-inverted.BMP) | use instead, renamed to MPC1000.BMP, if the splash looks like a negative |"
+            echo
+            echo 'Keep a known-good stock JJOS .bin on a card before flashing anything.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: morningcloak-os
+          path: out/
+          if-no-files-found: error

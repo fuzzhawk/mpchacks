@@ -25,8 +25,14 @@ audio path — is mapped but not yet reverse engineered.
 - The audio DSP overlay is located: the last 11.6 KB of the image is copied
   into the SH3-DSP's on-chip X/Y memories
 
-**Not yet solved:** display driver, CompactFlash driver, audio codec path,
-MIDI UART, pad/key scanning, and the whole application layer.
+- **The boot splash** — JJOS loads `MPC1000.BMP` from the card at start-up,
+  so the start-up image is changeable with no patching at all
+- **The display** — a Toshiba T6963C-compatible LCD controller at
+  `0xB6000000`, which is why there is no font in the firmware: the controller
+  has its own character ROM
+
+**Not yet solved:** CompactFlash driver, audio codec path, MIDI UART,
+pad/key scanning, and the whole application layer.
 
 ## Read these first
 
@@ -35,6 +41,7 @@ MIDI UART, pad/key scanning, and the whole application layer.
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | CPU, memory map, peripherals, flash — with the evidence for each claim |
 | [`docs/BOOT.md`](docs/BOOT.md) | The bootblock, step by step, from reset to OS entry |
 | [`docs/IMAGE_FORMAT.md`](docs/IMAGE_FORMAT.md) | The OS image header and CRC-32, and how to build a valid image |
+| [`docs/SPLASH.md`](docs/SPLASH.md) | The boot splash: `MPC1000.BMP`, its exact format, and the LCD controller |
 | [`docs/QLINK_FADERS.md`](docs/QLINK_FADERS.md) | Q-link faders -> sample start/end: hook points, patch space, and what reverse actually costs |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | What to do next, in order |
 | [`HANDOFF.md`](HANDOFF.md) | First-session notes. Partly superseded — corrections are marked inline |
@@ -54,6 +61,7 @@ MIDI UART, pad/key scanning, and the whole application layer.
 | Max OS image | `0xD0000` = 851,968 bytes |
 | OS run-time base | flash offset + `0x8842B644` (OS text starts at `0x8843B644`) |
 | DSP overlay | flash `0x0B3DFC`–`0x0B74D8` -> on-chip X/Y RAM |
+| LCD | Toshiba T6963C-compatible, 240x64, at `0xB6000000` |
 | Analyzed binary | JJOS 3.16, built 2015-02-13 |
 
 ## Tools
@@ -87,6 +95,8 @@ a bad bootblock write cannot be recovered on this machine.
 | `tools/strings_xref.py` | Strings plus the instructions that reference them |
 | `tools/mpcimg.py` | OS image verify / build / fix / extract |
 | `tools/mpcpatch.py` | Apply verified byte patches, fix the CRC, emit a flashable image |
+| `tools/mksplash.py` | Generate the `MPC1000.BMP` boot splash |
+| `tools/simsplash.py` | Decode a splash exactly as the firmware does, to check it |
 | `tools/ghidra_load_mpc1000.py` | Ghidra setup: memory blocks, labels, entry points |
 | `analyze.py` | Original first-session script (kept for reference) |
 
